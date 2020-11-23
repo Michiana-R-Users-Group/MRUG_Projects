@@ -1,0 +1,378 @@
+---
+title: "Using data.table"
+output:
+  revealjs::revealjs_presentation:
+    theme: dark
+    highlight: pygments
+    center: true
+    slide_level: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, 
+                      message = FALSE, comment = "")
+library(data.table)
+library(dplyr)
+library(tidyr)
+```
+
+## What Is data.table
+
+Simply put, it is a more powerful data frame.
+
+It offers chained indices, for pipe-like operations.
+
+## Why?
+
+We already have base R and the tidyverse, do we need something else?
+
+## The tidyverse loves to change
+
+Anyone still use reshape2? 
+
+What about gather/spread? 
+
+What about scoped variant dplyr verbs (e.g., mutate_at)?
+
+Of course Hadley has his reasons, but how does that work for long-term stability?
+
+## Speed is important
+
+While it is often faster than base R, the tidyverse can chug when operations are complex or when the data is chunky.
+
+It always depends on what you are doing, but data.table can offer dramatic speed increases.
+
+## How it works
+
+Everything that the tidyverse offers, data.table can do. 
+
+If you like base R, then data.table will work for you. 
+
+It uses an extra position (or 2) in the index to give you flexibility.
+
+You can also chain indices together.
+
+## Reading Data
+
+For delimited data from the web, things can be variable:
+
+```{r}
+dataLink <- "http://nd.edu/~sberry5/data/crimeScore.csv"
+
+microbenchmark::microbenchmark(
+  readr::read_csv(dataLink),
+  data.table::fread(dataLink),
+  times = 1
+)
+```
+
+## Locally
+
+Setting read_csv with 3K guesses and fread's default of 10K:
+
+```{r}
+library(readr)
+library(data.table)
+microbenchmark::microbenchmark(
+  read_csv("~/courses/crimeScore.csv", progress = FALSE, 
+           col_types = cols(), guess_max = 3000),
+  fread("~/courses/crimeScore.csv", showProgress = FALSE),
+  times = 10
+)
+```
+
+Not close at all...
+
+##
+
+You will also encounter fewer read issues with fread than with read_csv.
+
+All of your parse failures with read_csv are because it only uses the first 2000 rows by default.
+
+The guess in data.table will sample 10K rows from 100 straight rows, at 100 points through out the data.
+
+## Data Manipulation
+
+##
+
+The dplyr verbs are handy, but do they make for fast development?
+
+For tasks like creating or changing many columns, probably. 
+
+For tasks like filtering, probably not.
+
+## Selecting Variables
+
+Variable selection in data.table is similar to base:
+
+```{r}
+crimeScore <- data.table::fread(dataLink)
+
+crimeScore[, c("SSL_SCORE", "AGE_GROUP", 
+                  "COMMUNITY_AREA", "NARCOTICS_ARR_CNT")]
+```
+
+## Bare Names
+
+You can also pass in bare variable names with a `.` or `list`, but they are a little slower.
+
+```{r, eval = FALSE}
+crimeScore[, .(SSL_SCORE, AGE_GROUP, 
+                COMMUNITY_AREA, NARCOTICS_ARR_CNT)]
+
+crimeScore[, list(SSL_SCORE, AGE_GROUP, 
+                COMMUNITY_AREA, NARCOTICS_ARR_CNT)]
+```
+
+## Speed
+
+Surprisingly, dplyr has a faster selection.
+
+```{r, echo = FALSE}
+microbenchmark::microbenchmark(
+  select(crimeScore, SSL_SCORE, AGE_GROUP, 
+                COMMUNITY_AREA, NARCOTICS_ARR_CNT),
+  crimeScore[, c("SSL_SCORE", "AGE_GROUP", 
+                  "COMMUNITY_AREA", "NARCOTICS_ARR_CNT")],
+  times = 200
+)
+```
+
+
+## Filtering
+
+Much like selection is base-flavored, so is filtering:
+
+```{r}
+crimeScore[AGE_CURR != "" &
+              SEX_CODE_CD != "X" &
+              COMMUNITY_AREA != ""]
+```
+
+## Speed
+
+Still not seeing a speed increase...
+
+```{r, echo = FALSE}
+microbenchmark::microbenchmark(
+  filter(crimeScore, 
+         AGE_CURR != "" &
+           SEX_CODE_CD != "X" &
+           COMMUNITY_AREA != ""),
+  crimeScore[AGE_CURR != "" &
+               SEX_CODE_CD != "X" &
+               COMMUNITY_AREA != ""],
+  times = 200
+)
+```
+
+## Mutation
+
+```{r}
+crimeScore[, `:=`(AGE_CURR = relevel(as.factor(AGE_CURR),
+                                     ref = "less than 20"), 
+                  RAW_SSL_SCORE = RAW_SSL_SCORE * 100,
+                  RAW_HEAT_SCORE = RAW_HEAT_SCORE * 100)]
+```
+
+## The Skull Operator
+
+When using `:=`, you don't have to assign back to crimeScore.
+
+It will do it automatically.
+
+You will see `:=` scattered throughout data.table code.
+
+## Speed
+
+Now we are seeing some speed boosts from data.table.
+
+```{r, echo = FALSE}
+microbenchmark::microbenchmark(
+  mutate(crimeScore, AGE_CURR = relevel(as.factor(AGE_CURR),
+                                        ref = "less than 20"), 
+         RAW_SSL_SCORE = RAW_SSL_SCORE * 100,
+         RAW_HEAT_SCORE = RAW_HEAT_SCORE * 100),
+crimeScore[, `:=`(AGE_CURR = relevel(as.factor(AGE_CURR),
+                                     ref = "less than 20"), 
+                  RAW_SSL_SCORE = RAW_SSL_SCORE * 100,
+                  RAW_HEAT_SCORE = RAW_HEAT_SCORE * 100)],
+times = 200
+)
+```
+
+## Something like mutate(across())
+
+This will look pretty familiar to base R users.
+
+```{r, eval = FALSE}
+factorVars <- c("AGE_CURR", "AGE_GROUP", "RACE_CODE_CD")
+
+crimeScore[, 
+            (numericVars) := lapply(.SD, function(x) as.numeric(x)), 
+            .SDcols = numericVars]
+```
+
+## Unpacking .SD
+
+We get a ton of handy functions in data.table.
+
+.SD is an abbreviation for **s**ubset **d**ata.table
+
+## Group & Summarize
+
+Now we can start using the third index position:
+
+```{r}
+crimeScore[, mean(SSL_SCORE), by = COMMUNITY_AREA]
+```
+
+## Speed
+
+Continued speed boosts
+
+```{r, echo = FALSE}
+microbenchmark::microbenchmark(
+  group_by(crimeScore, COMMUNITY_AREA) %>% 
+    summarize(mean(SSL_SCORE), .groups = "keep"),
+ crimeScore[, mean(SSL_SCORE), by = COMMUNITY_AREA],
+  times = 200
+)
+```
+
+
+## Using Both Index Positions
+
+Let's do something base like:
+
+```{r}
+crimeScore[AGE_CURR != "" &
+             SEX_CODE_CD != "X" &
+             COMMUNITY_AREA != "", 
+           c("SSL_SCORE", "AGE_GROUP", 
+             "COMMUNITY_AREA", "NARCOTICS_ARR_CNT")]
+```
+
+
+## Speed
+
+```{r, echo = FALSE}
+microbenchmark::microbenchmark(
+  select(crimeScore, SSL_SCORE, AGE_CURR, 
+         COMMUNITY_AREA, NARCOTICS_ARR_CNT, 
+         SEX_CODE_CD) %>% 
+    filter( AGE_CURR != "" &
+              SEX_CODE_CD != "X" &
+              COMMUNITY_AREA != ""),
+  crimeScore[AGE_CURR != "" &
+               SEX_CODE_CD != "X" &
+               COMMUNITY_AREA != "", 
+             c("SSL_SCORE", "AGE_CURR", 
+               "COMMUNITY_AREA", "NARCOTICS_ARR_CNT", 
+               "SEX_CODE_CD")],
+  times = 200
+)
+```
+
+##
+
+And this is where we start to see speed increases.
+
+As you start adding pipes, you will see slower run times.
+
+We won't see it here, but merge/join has huge time differences.
+
+## Chaining Indices
+
+Everyone loves `%>%`, but we can chain our brackets to do something similar:
+
+```{r}
+crimeScore[AGE_CURR != "" & SEX_CODE_CD != "X" & COMMUNITY_AREA != "", 
+           c("SSL_SCORE", "AGE_CURR", "COMMUNITY_AREA", 
+             "NARCOTICS_ARR_CNT", "SEX_CODE_CD")
+][, 
+  .(meanSSL = mean(SSL_SCORE, na.rm = TRUE), 
+    meanNARC = mean(NARCOTICS_ARR_CNT, na.rm = TRUE)), 
+  by = COMMUNITY_AREA]
+```
+
+## 
+
+This is where things get tricky. 
+
+Pipes produce nicely-formatted and legible code.
+
+Chained indices are not as pretty.
+
+Using breaks liberally will certainly help produce more legible code.
+
+## Speed
+
+While the code isn't there, you can see the calls. Getting bigger differences.
+
+```{r, echo = FALSE}
+microbenchmark::microbenchmark(
+  select(crimeScore, SSL_SCORE, AGE_CURR, 
+         COMMUNITY_AREA, NARCOTICS_ARR_CNT, 
+         SEX_CODE_CD) %>% 
+    filter( AGE_CURR != "" &
+              SEX_CODE_CD != "X" &
+              COMMUNITY_AREA != "") %>% 
+    group_by(COMMUNITY_AREA) %>% 
+    summarize(meanSSL = mean(SSL_SCORE, na.rm = TRUE), 
+              meanNARC = mean(NARCOTICS_ARR_CNT, na.rm = TRUE), 
+              .groups = "keep"),
+  crimeScore[AGE_CURR != "" &
+               SEX_CODE_CD != "X" &
+               COMMUNITY_AREA != "", 
+             c("SSL_SCORE", "AGE_CURR", 
+               "COMMUNITY_AREA", "NARCOTICS_ARR_CNT", 
+               "SEX_CODE_CD")]
+  [, 
+    .(meanSSL = mean(SSL_SCORE, na.rm = TRUE), 
+      meanNARC = mean(NARCOTICS_ARR_CNT, na.rm = TRUE)), 
+    by = COMMUNITY_AREA],
+  times = 200
+)
+```
+
+## Getting Your Feet Wet
+
+Maybe you have a lot of dplyr pipes already written and don't want to convert.
+
+The dtplyr package finally does what it was always intended to do!
+
+## dtplyr
+
+Convert the object to a `lazy_dt` to see how it would be converted:
+
+```{r}
+library(dtplyr)
+
+select(lazy_dt(crimeScore), SSL_SCORE, AGE_CURR, 
+         COMMUNITY_AREA, NARCOTICS_ARR_CNT, 
+         SEX_CODE_CD) %>% 
+    filter( AGE_CURR != "" &
+              SEX_CODE_CD != "X" &
+              COMMUNITY_AREA != "") %>% 
+    group_by(COMMUNITY_AREA) %>% 
+    summarize(meanSSL = mean(SSL_SCORE, na.rm = TRUE), 
+              meanNARC = mean(NARCOTICS_ARR_CNT, na.rm = TRUE))
+```
+
+## Returning a data.table
+
+Add any coersion as your final pipe statement to return the object:
+
+```{r}
+select(lazy_dt(crimeScore), SSL_SCORE, AGE_CURR, 
+         COMMUNITY_AREA, NARCOTICS_ARR_CNT, 
+         SEX_CODE_CD) %>% 
+    filter( AGE_CURR != "" &
+              SEX_CODE_CD != "X" &
+              COMMUNITY_AREA != "") %>% 
+    group_by(COMMUNITY_AREA) %>% 
+    summarize(meanSSL = mean(SSL_SCORE, na.rm = TRUE), 
+              meanNARC = mean(NARCOTICS_ARR_CNT, na.rm = TRUE)) %>% 
+  as.data.table()
+```

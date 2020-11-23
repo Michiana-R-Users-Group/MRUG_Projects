@@ -1,0 +1,348 @@
+---
+title: "Cleaning Up Your Messy Data in R"
+subtitle: "with the `janitor` Package"
+author: "Scott Nestler"
+institute: "Michiana RUG"
+date: "2020-11-20"
+output:
+  xaringan::moon_reader:
+  lib_dir: libs
+nature:
+  highlightStyle: github
+highlightLines: true
+countIncrementalSlides: false
+---
+  
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(include = TRUE)
+```
+<style>
+  img {
+    display: block;
+    margin: 0 auto;
+  }
+hide {
+  display: none;
+}
+.remark-slide-content h1 {
+  font-size: 45px;
+}
+h1 {
+  font-size: 2em;
+  margin-block-start: 0.67em;
+  margin-block-end: 0.67em;
+}
+.remark-slide-content {
+  font-size: 16px
+}
+.remark-code {
+  font-size: 16px;
+}
+code.r {
+  font-size: 16px;
+}
+pre {
+  margin-top: 0px;
+  margin-bottom: 0px;
+}
+</style>
+
+# The `janitor` Package
+
+## Motivation:
+
+- "Data scientists, according to interviews and expert estimates, spend from 50 percent to 80 percent of their time mired in this more mundane labor of collecting and preparing unruly digital data, before it can be explored for useful nuggets." (NYT, 2014)
+
+## 3 Main Purposes:
+
+- Format ugly data.frame column names
+
+- Isolate partially duplicate records
+
+- Create and format quick tabulations with 1 to 3 variables
+
+## NOTES:
+
+1. janitor is a `tidyverse`-oriented package that plays nicely with the `%>%` pipe.
+
+2. Works best with data brought in with `readr` and `readxl` packages.
+
+---
+
+# Two Ways to Install `janitor`
+
+* Official, released version from CRAN
+
+  - `install.packages("janitor")`
+
+* Latest development version from GitHub 
+
+  - `install.packages("devtools")`
+  - ` devtools::install_github("sfirke/janitor")`
+
+<img src = "github_janitor.png" width = "800" align = "center">
+
+---
+  
+# Function 1:  Cleaning Dirty Data
+
+So let's look at some dirty data.  I've got some student data in an Excel file.
+
+```{r}
+library(janitor)
+library(readxl)
+dirty <- read_excel("MessyData.xlsx")
+colnames(dirty)
+```
+
+So what problems do you see here?
+
+  - 
+  - 
+  - 
+
+---
+
+# Cleaning Names
+
+As discussed, there are a number of issues with the column names in this data set:
+
+  - Inconsistent capitalization
+  - Spaces in two word names
+  - A percent sign
+
+We can clean them with the `clean_names()` function as follows.  Let's see what changed.
+
+```{r}
+clean <- clean_names(dirty)
+data.frame(colnames(dirty), colnames(clean))
+```
+Note that spaces have been replaced with underscores, capitalization is consistent
+(in lower case), and the % sign was replaced with the word "percent".
+---
+
+# Cleaning Data
+
+Let's look at the full data set to see what issues remain.
+
+```{r}
+clean
+```
+
+
+---
+
+# Function 2:  Finding Duplicates
+
+The `get_dupes()` function is provided for this purpose, and can be used with one
+or multiple variables.
+
+```{r}
+clean %>% get_dupes(id)
+clean %>% get_dupes(overall_percent, grade)
+```
+
+It shouldn't surprise us that no duplicates were found for "id", since these should
+be unique.  However, note that there are two records with the same "overall_percent"
+of 83 and and "grade" of B.  This clearly isn't an issue, but shows how `get_dupes` works.
+
+---
+
+# Function 3:  Creating Tables Quickly
+
+  - In base R, we could produce a table of grades with:
+  
+```{r}
+table(clean$grade)
+```
+  
+  - With the `taybl()` function from `janitor`, we would do this.  Note that the 
+  flow is changed from horizontal to vertical, and we get both the count and the percentage.
+
+```{r}
+tabyl(clean, grade)
+```
+  
+  - If we want to get a bit fancier, using the tidyverse, this works too and produces
+the same output.
+  
+```{r}
+clean %>% tabyl(grade)
+```
+  
+---
+
+# Function 3:  Making Tables Look Better
+
+But that still isn't very attractive.  Do we really need 8 decimal places in the
+percent column?  Probably not.
+
+A simple modification to the previous code, using the `adorn_pct_formatting`
+function will take care of this.
+
+```{r}
+clean %>% tabyl(grade) %>% adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+```
+
+There are a number of other `adorn` functions, including:
+
+  - `adorn_percentages` : convert a data.frame of counts to percentages
+  - `adorn_rounding` : round the numeric columns in a data.frame
+  - `adorn_title` : add column name to the top of a two-way tabyl (1)
+  - `adorn_totals` : append a totals row and/or column to a data.frame
+
+(1) Makes tabyl prettier, but renders data.fram less useful for further manipulation.
+---
+
+# Tables With More Than One Variable
+
+This also works in base R, but note that it isn't clear what the first variable
+actually is in the output.
+
+```{r}
+table(clean$grade, clean$sex)
+```
+
+Whereas, with `taybl`, you can see both variable names.
+
+```{r}
+clean %>% tabyl(grade, sex)
+```
+
+---
+
+# Using the `adorn_totals` Function
+
+Here, you can see how `adorn_totals()` adds row totals by default.  You can get
+column totals, or both, with the `where` parameter.
+
+```{r}
+clean %>% tabyl(grade, sex) %>% adorn_totals()
+clean %>% tabyl(grade, sex) %>% adorn_totals(where = "col")
+clean %>% tabyl(grade, sex) %>% adorn_totals(where = c("row","col"))
+```
+
+---
+
+# Using the `adorn_percentages` Function
+
+We already saw `the adorn_pct_formatting` function. But this function is a little
+bit different. 
+
+First, the default is for it to calculate by row, whether it is specified or not.
+
+```{r}
+clean %>% tabyl(grade, sex) %>% adorn_percentages() %>% adorn_pct_formatting()
+```
+
+But if we add the "col" argument, note how the percentages are calculated now.
+
+```{r}
+clean %>% tabyl(grade, sex) %>% adorn_percentages("col") %>% adorn_pct_formatting()
+```
+
+---
+
+# Using the `adorn_ns` Function
+
+```{r}
+clean %>% tabyl(grade, sex) %>%
+  adorn_totals("row") %>%
+  adorn_percentages("row") %>%
+  adorn_pct_formatting %>% 
+  adorn_ns()
+```
+
+Note that above, the count goes to the back (in parenthesis) position.  If you
+want percentage to be there, add the "front" argument.
+
+```{r}
+clean %>% tabyl(grade, sex) %>%
+  adorn_totals("row") %>%
+  adorn_percentages("row") %>%
+  adorn_pct_formatting %>% 
+  adorn_ns("front")
+```
+
+---
+
+What about a 3-Variable Taybl?
+
+```{r}
+clean %>% tabyl(grade, sex, section)
+```
+
+You can see how it adds the 3rd dimension (section) by listing it as 2 tables.
+This is similar to how `table` would do it too, but again just looks cleaner.
+
+---
+
+# Removing Empty Columns
+
+You may have noticed that the "Fav Subject" column (or "fav_subject" after cleaning),
+doesn't actually have any data in it. So if we look at a taybl of it, we see:
+
+```{r}
+clean %>% tabyl(fav_subject)
+```
+
+
+That isn't particularly helpful.  We can use the `remove_empty()` function from 
+`janitor` to prevent this, as follows:
+
+```{r}
+clean_x <- clean %>% remove_empty(which = "cols")
+names(clean)
+names(clean_x)
+```
+Note that "fav_section" is not listed in the second set of column names.
+
+Can be used with a "rows" argument too.
+
+---
+
+# Using `remove_constant` to get rid of constant columns.
+
+Does the "Semester" column really add any value here?
+
+```{r}
+clean_y <- clean %>% remove_constant()
+names(clean)
+names(clean_y)
+```
+
+Note that "semester" is not listed in the second set of column names.  Also,
+It removes "fav_section" becasue empty is a specific type of constant.
+
+---
+
+# **BONUS** Function:  `excel_numeric_to_date`
+
+How many times have you had issues with dates in files that came from Excel?
+
+When is "444155" anyway?
+
+This is essentially a wrapper to functions from  the `lubridate` package.
+
+```{r}
+excel_numeric_to_date(44155)
+```
+Oh, that's today!!!
+
+---
+
+# Some Helpful Resources
+
+  + [janitor Package on CRAN](https://cran.r-project.org/web/packages/janitor/index.html)
+
+  + [janitor Reference Manual](https://cran.r-project.org/web/packages/janitor/janitor.pdf)
+  
+  + [GitHub page for janitor](https://github.com/sfirke/janitor)
+  
+  + A [helpful video](https://www.youtube.com/watch?v=9ivbY48mUvs) I used in preparing these slides.
+  
+  + [R-Ladies Sydney Blog](https://rladiessydney.org/courses/ryouwithme/02-cleanitup-1/)
+  
+  + [R-bloggers Examples](https://www.r-bloggers.com/2020/09/how-to-clean-data-janitor-package/)
+        
